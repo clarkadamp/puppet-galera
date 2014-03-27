@@ -38,7 +38,7 @@ bind-address=<%= @wsrep_bind_address %>
 ##
 
 # Full path to wsrep provider library or 'none'
-wsrep_provider=/usr/lib/galera/libgalera_smm.so
+wsrep_provider=/usr/<%= @galeralibdir %>/galera/libgalera_smm.so
 
 # Provider specific configuration options
 #wsrep_provider_options=
@@ -47,11 +47,7 @@ wsrep_provider=/usr/lib/galera/libgalera_smm.so
 wsrep_cluster_name="<%= @cluster_name %>"
 
 # Group communication system handle
-<% if @master_ip -%>
-wsrep_cluster_address="gcomm://<%= @master_ip %>"
-<% else -%>
-wsrep_cluster_address="gcomm://"
-<% end -%>
+wsrep_cluster_address="gcomm://<%= master_ip.join(",") %>"
 
 # Human-readable node name (non-unique). Hostname by default.
 #wsrep_node_name=

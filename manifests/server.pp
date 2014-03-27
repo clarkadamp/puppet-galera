@@ -45,68 +45,41 @@
 #  }
 #
 class galera::server (
+  $client_package_name = 'MariaDB-client',
   $config_hash         = {},
   $enabled             = true,
   $manage_service      = true,
   $root_group          = $mysql::root_group,
   $package_ensure      = $mysql::package_ensure,
-  $galera_package_name = 'galera',
-  $wsrep_package_name  = 'mysql-server-wsrep',
-  $libaio_package_name = 'libaio1',
-  $libssl_package_name = 'libssl0.9.8',
-  $wsrep_deb_name      = 'mysql-server-wsrep-5.5.23-23.6-amd64.deb',
-  $wsrep_deb_source    = 'http://launchpad.net/codership-mysql/5.5/5.5.23-23.6/+download/mysql-server-wsrep-5.5.23-23.6-amd64.deb',
-  $galera_deb_name     = 'galera-23.2.1-amd64.deb',
-  $galera_deb_source   = 'http://launchpad.net/galera/2.x/23.2.1/+download/galera-23.2.1-amd64.deb',
   $wsrep_bind_address  = '0.0.0.0',
   $cluster_name        = 'wsrep',
   $master_ip           = false,
+  $pidfile             = '/var/run/mysqld.pid',
+  $server_package_name = 'MariaDB-Galera-server',
+  $service_name        = 'mysql',
   $wsrep_sst_username  = 'wsrep_user',
   $wsrep_sst_password  = 'wsrep_pass',
   $wsrep_sst_method    = 'mysql_dump'
 ) inherits mysql {
 
+  class { 'galera::repo':
+    before  => Package['mysql_client'],
+  }
+
+  package { $server_package_name:
+    ensure   => present,
+    require  => Class['galera::repo'],
+  }
+
+  case $hardwaremodel {
+    "i386", "i686": { $galeralibdir = "lib" }
+    "x86_64":       { $galeralibdir = "lib64" }
+    default:        { fail("Hardware not supported") }
+  }
+
   $config_class = { 'mysql::config' => $config_hash }
 
   create_resources( 'class', $config_class )
-
-  exec { 'download-wsrep':
-    command => "wget -O /tmp/${wsrep_deb_name} ${wsrep_deb_source} --no-check-certificate",
-    path    => '/usr/bin:/usr/sbin:/bin:/sbin',
-    creates => "/tmp/${wsrep_deb_name}",
-  }
-
-  exec { 'download-galera':
-    command => "wget -O /tmp/${galera_deb_name} ${galera_deb_source} --no-check-certificate",
-    path    => '/usr/bin:/usr/sbin:/bin:/sbin',
-    creates => "/tmp/${galera_deb_name}",
-  }
-
-  package { 'wsrep':
-    ensure   => $package_ensure,
-    name     => $wsrep_package_name,
-    provider => 'dpkg',
-    require  => [Exec['download-wsrep'],Package['libaio','libssl']],
-    source   => "/tmp/${wsrep_deb_name}",
-  }
-
-  package { 'galera':
-    ensure   => $package_ensure,
-    name     => $galera_package_name,
-    provider => 'dpkg',
-    require  => [Exec['download-galera'],Package['wsrep']],
-    source   => "/tmp/${galera_deb_name}",
-  }
-
-  package { 'libaio' :
-    ensure   => $package_ensure,
-    name     => $libaio_package_name
-  }
-
-  package { 'libssl' :
-    ensure   => $package_ensure,
-    name     => $libssl_package_name
-  }
 
   file { '/etc/mysql/conf.d/wsrep.cnf' :
     ensure  => present,
@@ -115,6 +88,29 @@ class galera::server (
     group   => $root_group,
     content => template('galera/wsrep.cnf.erb'),
     notify  => Service['mysqld']
+  }
+
+  file { '/etc/init.d/mysql' :
+    ensure  => present,
+    mode    => '0755',
+    owner   => 'root',
+    group   => 'root',
+    content => template('galera/mysql.erb'),
+    require => Package[$server_package_name],
+  }
+  
+  package { 'rsync':
+    ensure   => present,
+    before   => File['/etc/mysql/conf.d/wsrep.cnf'],
+  }
+
+  file { '/var/run/mysqld':
+    ensure  => directory,
+    mode    => 0755,
+    owner   => mysql,
+    group   => mysql,
+    require => Package[$server_package_name],
+    before  => Service['mysqld'],
   }
 
   if $enabled {
@@ -129,7 +125,13 @@ class galera::server (
       ensure   => $service_ensure,
       name     => 'mysql',
       enable   => $enabled,
-      require  => Package[$wsrep_package_name],
+      require  => [ File['/etc/init.d/mysql'] , File['/etc/mysql/conf.d/wsrep.cnf'] ],
     }
+
+    database_user { "${wsrep_sst_username}@%":
+        password_hash   => mysql_password($wsrep_sst_password)
+    } 
   }
+
+
 }
