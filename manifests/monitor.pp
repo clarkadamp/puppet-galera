@@ -115,14 +115,18 @@ class galera::monitor(
   }
 
   # Create a user for MySQL Galera health check script.
-  database_user{ "${monitor_username}@${monitor_hostname}":
+  mysql_user{ "${monitor_username}@${monitor_hostname}":
     ensure        => present,
     password_hash => mysql_password($monitor_password),
-    require       => [File['/root/.my.cnf'],Service['mysqld']],
+    require       => Service['mysqld'],
   }
 
-  database_grant { "${monitor_username}@${monitor_hostname}":
-    privileges => [ 'process_priv', 'super_priv' ],
-    require    => Database_user["${monitor_username}@${monitor_hostname}"],
-  }
+#  mysql_grant { "${monitor_username}@${monitor_hostname}/information_schema.*":
+#    ensure     => present,
+#    options    => [ 'GRANT' ],
+#    privileges => [ 'process_priv', 'super_priv' ],
+#    table      => 'information_schema.*',
+#    user       => "${monitor_username}@${monitor_hostname}",
+#    require    => Mysql_user["${monitor_username}@${monitor_hostname}"],
+#  }
 }

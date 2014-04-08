@@ -45,41 +45,54 @@
 #  }
 #
 class galera::server (
-  $client_package_name = 'MariaDB-client',
-  $config_hash         = {},
-  $enabled             = true,
-  $manage_service      = true,
-  $root_group          = $mysql::root_group,
-  $package_ensure      = $mysql::package_ensure,
-  $wsrep_bind_address  = '0.0.0.0',
   $cluster_name        = 'wsrep',
+  $client_package_name = 'MariaDB-client',
   $master_ip           = false,
-  $pidfile             = '/var/run/mysqld.pid',
+  $mysql_bind_address  = '0.0.0.0',
+  $root_password       = undef,
   $server_package_name = 'MariaDB-Galera-server',
   $service_name        = 'mysql',
+  $wsrep_bind_address  = '0.0.0.0',
   $wsrep_sst_username  = 'wsrep_user',
   $wsrep_sst_password  = 'wsrep_pass',
+  $wsrep_sst_access    = '%',
   $wsrep_sst_method    = 'mysql_dump'
-) inherits mysql {
+) {
 
   class { 'galera::repo':
-    before  => Package['mysql_client'],
+    before => Class['mysql::client','mysql::server']
   }
 
-  package { $server_package_name:
-    ensure   => present,
-    require  => Class['galera::repo'],
+  class { '::mysql::client':
+    package_name => $client_package_name
   }
-
+ 
+  class { '::mysql::server':
+    package_name   => $server_package_name,
+    service_name   => $service_name,
+    root_password  => $root_password,
+    users          => {
+      "${wsrep_sst_username}@${wsrep_sst_access}" => {
+          ensure        => 'present',
+          password_hash => mysql_password($wsrep_sst_password),
+        }
+    }
+  }
+  
   case $hardwaremodel {
     "i386", "i686": { $galeralibdir = "lib" }
     "x86_64":       { $galeralibdir = "lib64" }
     default:        { fail("Hardware not supported") }
   }
 
-  $config_class = { 'mysql::config' => $config_hash }
-
-  create_resources( 'class', $config_class )
+  file { '/var/run/mysqld/':
+    ensure  => directory,
+    mode    => '0755',
+    owner   => 'mysql',
+    group   => 'mysql',
+    require => Package['mysql-server'],
+    before  => Service['mysqld']
+  }
 
   file { '/etc/mysql/conf.d/wsrep.cnf' :
     ensure  => present,
@@ -87,6 +100,7 @@ class galera::server (
     owner   => 'root',
     group   => $root_group,
     content => template('galera/wsrep.cnf.erb'),
+    require => File['/etc/mysql/conf.d/'],
     notify  => Service['mysqld']
   }
 
@@ -96,42 +110,15 @@ class galera::server (
     owner   => 'root',
     group   => 'root',
     content => template('galera/mysql.erb'),
-    require => Package[$server_package_name],
-  }
-  
-  package { 'rsync':
-    ensure   => present,
-    before   => File['/etc/mysql/conf.d/wsrep.cnf'],
+    require => Package['mysql-server'],
+    before  => Service['mysqld']
   }
 
-  file { '/var/run/mysqld':
-    ensure  => directory,
-    mode    => 0755,
-    owner   => mysql,
-    group   => mysql,
-    require => Package[$server_package_name],
-    before  => Service['mysqld'],
-  }
-
-  if $enabled {
-    $service_ensure = 'running'
-  } else {
-    $service_ensure = 'stopped'
-  }
-
-  if $manage_service {
-    Service['mysqld'] -> Exec<| title == 'set_mysql_rootpw' |>
-    service { 'mysqld':
-      ensure   => $service_ensure,
-      name     => 'mysql',
-      enable   => $enabled,
-      require  => [ File['/etc/init.d/mysql'] , File['/etc/mysql/conf.d/wsrep.cnf'] ],
+  if $wsrep_sst_method == 'rsync' {
+    package { 'rsync':
+     ensure => present,
+     before  => Service['mysqld']
     }
-
-    database_user { "${wsrep_sst_username}@%":
-        password_hash   => mysql_password($wsrep_sst_password)
-    } 
   }
-
-
+ 
 }
